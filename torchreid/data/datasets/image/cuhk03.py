@@ -1,5 +1,7 @@
 from __future__ import division, print_function, absolute_import
 import os.path as osp
+import glob
+import re
 
 from torchreid.utils import read_json, write_json, mkdir_if_missing
 
@@ -28,7 +30,6 @@ class CUHK03(ImageDataset):
         root='',
         split_id=0,
         cuhk03_labeled=False,
-        cuhk03_classic_split=False,
         **kwargs
     ):
         self.root = osp.abspath(osp.expanduser(root))
@@ -36,58 +37,48 @@ class CUHK03(ImageDataset):
         self.download_dataset(self.dataset_dir, self.dataset_url)
 
         self.data_dir = osp.join(self.dataset_dir, 'cuhk03_release')
-        self.raw_mat_path = osp.join(self.data_dir, 'cuhk-03.mat')
 
-        self.imgs_detected_dir = osp.join(self.dataset_dir, 'images_detected')
-        self.imgs_labeled_dir = osp.join(self.dataset_dir, 'images_labeled')
+        self.imgs_detected_dir = osp.join(self.dataset_dir, 'detected')
+        self.imgs_labeled_dir = osp.join(self.dataset_dir, 'labeled')
 
-        self.split_classic_det_json_path = osp.join(
-            self.dataset_dir, 'splits_classic_detected.json'
-        )
-        self.split_classic_lab_json_path = osp.join(
-            self.dataset_dir, 'splits_classic_labeled.json'
-        )
+        self.imgs_dir = self.imgs_labeled_dir if cuhk03_labeled else self.imgs_detected_dir
 
-        self.split_new_det_json_path = osp.join(
-            self.dataset_dir, 'splits_new_detected.json'
-        )
-        self.split_new_lab_json_path = osp.join(
-            self.dataset_dir, 'splits_new_labeled.json'
-        )
-
-        self.split_new_det_mat_path = osp.join(
-            self.dataset_dir, 'cuhk03_new_protocol_config_detected.mat'
-        )
-        self.split_new_lab_mat_path = osp.join(
-            self.dataset_dir, 'cuhk03_new_protocol_config_labeled.mat'
-        )
+        self.train_dir = osp.join(self.imgs_dir, "bounding_box_train")
+        self.query_dir = osp.join(self.imgs_dir, "query")
+        self.gallery_dir = osp.join(self.imgs_dir, "bounding_box_test")
 
         required_files = [
-            self.dataset_dir, self.data_dir, self.raw_mat_path,
-            self.split_new_det_mat_path, self.split_new_lab_mat_path
+            self.dataset_dir, self.train_dir, self.query_dir, self.gallery_dir
         ]
+
         self.check_before_run(required_files)
 
-        self.preprocess_split()
-
-        if cuhk03_labeled:
-            split_path = self.split_classic_lab_json_path if cuhk03_classic_split else self.split_new_lab_json_path
-        else:
-            split_path = self.split_classic_det_json_path if cuhk03_classic_split else self.split_new_det_json_path
-
-        splits = read_json(split_path)
-        assert split_id < len(
-            splits
-        ), 'Condition split_id ({}) < len(splits) ({}) is false'.format(
-            split_id, len(splits)
-        )
-        split = splits[split_id]
-
-        train = split['train']
-        query = split['query']
-        gallery = split['gallery']
+        train = self.process_dir(self.train_dir, relabel=True)
+        query = self.process_dir(self.query_dir, relabel=False)
+        gallery = self.process_dir(self.gallery_dir, relabel=False)
 
         super(CUHK03, self).__init__(train, query, gallery, **kwargs)
+
+    def process_dir(self, dir_path, relabel=False):
+        img_paths = glob.glob(osp.join(dir_path, '*.png'))
+        pattern = re.compile(r'([-\d]+)_c(\d)')
+
+        pid_container = set()
+        for img_path in img_paths:
+            pid, _ = map(int, pattern.search(img_path).groups())
+            pid_container.add(pid)
+        pid2label = {pid: label for label, pid in enumerate(pid_container)}
+
+        data = []
+        for img_path in img_paths:
+            pid, camid = map(int, pattern.search(img_path).groups())
+            assert 1 <= camid <= 15
+            camid -= 1 # index starts from 0
+            if relabel:
+                pid = pid2label[pid]
+            data.append((img_path, pid, camid))
+
+        return data
 
     def preprocess_split(self):
         # This function is a bit complex and ugly, what it does is
