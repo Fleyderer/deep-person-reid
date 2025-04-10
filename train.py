@@ -1,5 +1,11 @@
 import argparse
+import os
 import torchreid
+
+
+def set_visible_gpus(gpu_ids):
+    os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, gpu_ids))
+    print(f"Using GPUs: {os.environ['CUDA_VISIBLE_DEVICES']}")
 
 
 def train_reid_model(
@@ -47,13 +53,13 @@ def train_reid_model(
     optimizer = torchreid.optim.build_optimizer(
         model,
         optim=optimizer_name,
-        lr=0.0003  # You can also make this a CLI argument
+        lr=0.0003
     )
 
     scheduler = torchreid.optim.build_lr_scheduler(
         optimizer,
         lr_scheduler=scheduler_name,
-        stepsize=20  # Also optional for CLI
+        stepsize=20
     )
 
     engine = torchreid.engine.ImageSoftmaxEngine(
@@ -93,8 +99,12 @@ if __name__ == "__main__":
     parser.add_argument("--bs-test", type=int, default=100)
     parser.add_argument("--transforms", nargs="+", default=["random_flip"])
     parser.add_argument("--market1501-500k", action="store_true")
+    parser.add_argument("--gpus", nargs="+", type=int, default=[0], help="List of GPU IDs to use")
 
     args = parser.parse_args()
+
+    # Set visible GPUs
+    set_visible_gpus(args.gpus)
 
     train_reid_model(
         exp_name=args.exp_name,
